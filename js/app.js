@@ -81,40 +81,45 @@ function icon(name) {
 }
 
 function brand() {
-  return '<div class="brand"><span class="brand-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M4 20V4h16M4 11h13M10 20V4M10 17h10"/></svg></span><span>FACULTY<br>EVALUATION</span></div>';
+  return '<div class="brand"><img class="brand-logo" src="assets/olopsc-crest.png" alt=""><span class="brand-copy"><strong>Our Lady of Perpetual Succor College</strong><small>FACULTY EVALUATION</small></span></div>';
 }
 
 function renderLogin() {
   document.title = 'Sign in | Faculty Evaluation';
-  app.innerHTML = `<main class="login-page" id="main-content">
+  app.innerHTML = `<main class="login-shell" id="main-content"><div class="login-page">
     <section class="login-story" aria-labelledby="login-title">
       ${brand()}
       <div class="login-intro">
-        <div class="editorial-rule"></div><span class="eyebrow">Faculty Evaluation System</span>
-        <h1 id="login-title">Evaluate.<br>Improve.<br>Grow.</h1>
-        <p>Better learning starts with a conversation. Your feedback helps shape what comes next.</p>
-        <div class="principles"><div><span>01 / REFLECT</span><strong>Share your experience.</strong></div><div><span>02 / UNDERSTAND</span><strong>Find room to improve.</strong></div><div><span>03 / GROW</span><strong>Move forward together.</strong></div></div>
+        <span class="system-label">FACULTY EVALUATION SYSTEM</span>
+        <h1 id="login-title">TEACHING QUALITY<br>GROWS THROUGH<br>THOUGHTFUL<br><span>REFLECTION.</span></h1>
+        <div class="editorial-rule"></div>
       </div>
-      <p class="login-foot">A thoughtful approach to better teaching.</p>
     </section>
     <section class="login-form-area" aria-labelledby="signin-title"><div class="login-card">
-      <span class="eyebrow">Your academic workspace</span><h2 id="signin-title">Welcome back.</h2>
-      <p class="subtitle">Sign in to your faculty evaluation account.</p>
+      <span class="eyebrow">FACULTY EVALUATION SYSTEM</span><h2 id="signin-title">Welcome back</h2>
+      <p class="subtitle">Sign in with your OLOPSC account.</p>
       <form id="login-form">
-        <div class="field"><label class="field-label" for="username">Username</label><input id="username" name="username" autocomplete="username" placeholder="Enter your username" required></div>
+        <div class="field"><label class="field-label" for="username">Email</label><input id="username" name="username" autocomplete="username" placeholder="@olopsc.edu.ph" required></div>
         <div class="field"><label class="field-label" for="password">Password</label><div class="password-field"><input id="password" name="password" type="password" autocomplete="current-password" placeholder="Enter your password" required><button type="button" class="password-toggle" id="toggle-password" aria-label="Show password" aria-pressed="false">Show</button></div></div>
+        <div class="login-options"><label><input type="checkbox" id="keep-signed-in"> <span>Keep me signed in</span></label><a href="#forgot-password" id="forgot-password">Forgot password?</a></div>
         <p id="login-error" class="error" role="alert"></p>
-        <button class="button full-width" type="submit">Log in <span aria-hidden="true">↗</span></button>
+        <button class="button full-width" type="submit"><span aria-hidden="true">→</span> Sign in to the portal</button>
       </form>
       <div class="demo-accounts"><div class="demo-heading"><span class="eyebrow">Demo accounts</span><span class="demo-tag">PROTOTYPE</span></div>
-        <div class="account-row"><span>Student</span><code>student / student123</code></div>
-        <div class="account-row"><span>Guidance Office</span><code>admin / admin123</code></div>
-        <div class="account-row"><span>Faculty</span><code>rubycruz / ruby123</code></div>
-        <p class="demo-note">Use a demo account above. Your workspace is assigned automatically.</p>
+        <button class="account-row" type="button" data-demo="student"><span>Student</span><code>student / student123</code></button>
+        <button class="account-row" type="button" data-demo="faculty"><span>Faculty</span><code>faculty / ruby123</code></button>
+        <button class="account-row" type="button" data-demo="admin"><span>Administrator</span><code>admin / admin123</code></button>
       </div>
+      <div class="login-bottom"><a href="#privacy-policy">Privacy policy</a><span>© 2026 Our Lady Of Perpetual Succor College</span></div>
     </div></section>
-  </main>`;
+  </div></main>`;
   document.getElementById('login-form').addEventListener('submit', login);
+  document.querySelectorAll('[data-demo]').forEach(button => button.addEventListener('click', () => {
+    const role = button.dataset.demo;
+    document.getElementById('username').value = role === 'faculty' ? 'rubycruz' : role;
+    document.getElementById('password').value = role === 'student' ? 'student123' : role === 'faculty' ? 'ruby123' : 'admin123';
+    document.getElementById('username').focus();
+  }));
   document.getElementById('toggle-password').addEventListener('click', function () {
     const input = document.getElementById('password');
     const show = input.type === 'password';
@@ -127,15 +132,24 @@ function renderLogin() {
 
 function login(event) {
   event.preventDefault();
-  const username = document.getElementById('username').value.trim();
+  const entered = document.getElementById('username').value.trim();
+  const username = entered.includes('@') ? entered.split('@')[0] : entered;
   const password = document.getElementById('password').value;
-  const account = accounts.find(user => user.username === username && user.password === password);
+  const aliases = { faculty: 'rubycruz', administrator: 'admin' };
+  const account = accounts.find(user => user.username === (aliases[username.toLowerCase()] || username) && (user.password === password || (user.username === 'student' && password === 'student')));
   if (!account) {
     document.getElementById('login-error').textContent = 'Invalid username or password.';
     return;
   }
   try {
-    sessionStorage.setItem('currentUser', JSON.stringify({ username: account.username }));
+    const serialized = JSON.stringify({ username: account.username });
+    if (document.getElementById('keep-signed-in').checked) {
+      localStorage.setItem('currentUser', serialized);
+      sessionStorage.removeItem('currentUser');
+    } else {
+      sessionStorage.setItem('currentUser', serialized);
+      localStorage.removeItem('currentUser');
+    }
   } catch (error) {
     document.getElementById('login-error').textContent = 'Enable browser session storage to log in.';
     return;
@@ -146,6 +160,7 @@ function login(event) {
 
 function logout() {
   sessionStorage.removeItem('currentUser');
+  localStorage.removeItem('currentUser');
   currentUser = null;
   evaluationQuestions = [];
   renderLogin();
@@ -386,7 +401,7 @@ function renderConfirmation() {
 function initialize() {
   if (loadFromLocalStorage(storageKeys.questions, null) === null) saveToLocalStorage(storageKeys.questions, defaultQuestions);
   try {
-    const session = JSON.parse(sessionStorage.getItem('currentUser'));
+    const session = JSON.parse(sessionStorage.getItem('currentUser') || localStorage.getItem('currentUser'));
     currentUser = accounts.find(account => account.username === session?.username) || null;
   } catch (error) {
     currentUser = null;

@@ -14,9 +14,9 @@ You can also open `index.html` directly in a modern browser with JavaScript and 
 
 | Role | Username | Password |
 | --- | --- | --- |
-| Student — Juan Dela Cruz | `student` | `student123` |
+| Student — Juan Dela Cruz | `student` | `student123` (or `student`) |
 | Admin — Guidance Administrator | `admin` | `admin123` |
-| Faculty — Ruby Cruz | `rubycruz` | `ruby123` |
+| Faculty — Ruby Cruz | `faculty` or `rubycruz` | `ruby123` |
 
 The account determines the role. There is no role selector.
 
