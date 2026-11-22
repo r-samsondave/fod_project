@@ -149,9 +149,20 @@ td .muted { font-size: 12px; }
 .question-list { display: grid; gap: 0; border: 1px solid var(--border); }
 .question-row { background: var(--surface); border-bottom: 1px solid var(--border); padding: 20px 24px; display: grid; grid-template-columns: 32px 1fr auto; gap: 16px; align-items: center; }
 .question-row:last-child { border-bottom: 0; }
+.suggestion-row { display: block; }
+.suggestion-row .question-copy { min-width: 0; }
+.suggestion-row .question-copy > p:first-child { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; }
+.suggestion-row .question-category { overflow-wrap: anywhere; }
 .question-number { font-size: 12px; color: var(--muted); }
 .question-category { font-size: 11px; color: var(--muted); margin-top: 4px; }
+.subject-checkboxes { display: grid; gap: 8px; margin: 8px 0 10px; }
+.subject-checkbox { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.subject-checkbox input { width: 16px; height: 16px; margin: 0; accent-color: var(--navy); }
 .question-copy { overflow-wrap: anywhere; }
+.faculty-result-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.faculty-result-card { width: 100%; text-align: left; cursor: pointer; display: grid; gap: 6px; color: var(--text); }
+.faculty-result-card span { font-size: 12px; color: var(--muted); }
+.faculty-result-card.active { border-color: var(--navy); box-shadow: inset 3px 0 var(--navy); }
 .rating-guide { display: flex; flex-wrap: wrap; gap: 12px 24px; margin-top: 20px; font-size: 12px; color: var(--muted); }
 .rating-guide strong { color: var(--text); margin-right: 4px; }
 .evaluation-category { margin-top: 40px; }

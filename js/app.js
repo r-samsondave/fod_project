@@ -2,7 +2,7 @@ const categories = ['Teaching Effectiveness', 'Communication', 'Classroom Manage
 const roleNames = { student: 'Student', admin: 'Guidance Office', faculty: 'Faculty Member' };
 const navigation = {
   student: [['dashboard', 'Dashboard'], ['evaluation', 'Evaluations']],
-  admin: [['dashboard', 'Dashboard'], ['questions', 'Questions'], ['faculty', 'Faculty'], ['results', 'Results']],
+  admin: [['dashboard', 'Dashboard'], ['questions', 'Questions'], ['faculty', 'Faculty'], ['students', 'Students'], ['results', 'Results']],
   faculty: [['dashboard', 'Dashboard'], ['results', 'My Results']]
 };
 const app = document.getElementById('app');
@@ -10,7 +10,9 @@ let currentUser = null;
 let currentPage = 'dashboard';
 let evaluationQuestions = [];
 let evaluationTarget = null;
-let databaseState = { faculty: [], questions: [], responses: [], submittedTargets: [] };
+let adminResultFacultyId = '';
+let databaseState = { faculty: [], students: [], questions: [], responses: [], submittedTargets: [] };
+let studentFormOpen = false;
 
 async function apiRequest(path, options = {}) {
   const response = await fetch(path, {
@@ -28,6 +30,7 @@ function applyDatabaseState(data) {
   currentUser = data.user;
   databaseState = {
     faculty: data.faculty || [],
+    students: data.students || [],
     questions: data.questions || [],
     responses: data.responses || [],
     submittedTargets: data.submittedTargets || []
@@ -54,8 +57,9 @@ function icon(name) {
     dashboard: '<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>',
     questions: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
     faculty: '<circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M16 5a3 3 0 0 1 0 6M21 21v-3a6 6 0 0 0-3-5"/>',
+    students: '<circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M16 5a3 3 0 0 1 0 6M21 21v-3a6 6 0 0 0-3-5"/>',
     results: '<path d="M4 20V10M12 20V4M20 20v-7"/>',
-    evaluation: '<path d="M8 3H4v18h16V3h-4M8 2h8v4H8zM8 11h8M8 16h5"/>'
+    evaluation: '<circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M16 5a3 3 0 0 1 0 6M21 21v-3a6 6 0 0 0-3-5"/>'
   };
   return `<svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">${paths[name] || paths.dashboard}</svg>`;
 }
@@ -129,7 +133,7 @@ async function logout() {
   currentUser = null;
   evaluationQuestions = [];
   evaluationTarget = null;
-  databaseState = { faculty: [], questions: [], responses: [], submittedTargets: [] };
+  databaseState = { faculty: [], students: [], questions: [], responses: [], submittedTargets: [] };
   renderLogin();
   document.getElementById('username').focus();
 }
@@ -158,6 +162,7 @@ function renderPage(page) {
   if (page === 'confirmation') content = renderConfirmation();
   if (page === 'questions') content = renderQuestions();
   if (page === 'faculty') content = renderFaculty();
+  if (page === 'students') content = renderStudents();
   if (page === 'results') content = renderResults();
   const pageLabel = navigation[currentUser.role].find(item => item[0] === page)?.[1] || 'Evaluations';
   const initials = currentUser.name.split(' ').map(part => part[0]).slice(0, 2).join('');
@@ -171,6 +176,9 @@ function renderPage(page) {
       <main class="page" id="main-content">${content}<footer class="page-footer"><span>Faculty Evaluation System</span><span>School prototype · Saved in the local SQLite database</span></footer></main>
     </div></div>`;
   document.querySelectorAll('[data-page]').forEach(button => button.addEventListener('click', async () => {
+    if (button.dataset.page === 'students' && currentUser?.role === 'admin') {
+      try { await refreshDatabaseState(); } catch (error) { return; }
+    }
     if (button.dataset.page === 'evaluation' && currentUser?.role === 'student') {
       try {
         await refreshDatabaseState();
@@ -183,6 +191,14 @@ function renderPage(page) {
     }
     renderPage(button.dataset.page);
   }));
+  document.querySelectorAll('[data-result-faculty]').forEach(button => button.addEventListener('click', () => {
+    adminResultFacultyId = button.dataset.resultFaculty;
+    renderPage('results');
+  }));
+  document.getElementById('results-faculty')?.addEventListener('change', event => {
+    adminResultFacultyId = event.target.value;
+    renderPage('results');
+  });
   document.querySelectorAll('[data-start-evaluation]').forEach(button => button.addEventListener('click', () => { location.hash = `faculty=${encodeURIComponent(button.dataset.startEvaluation)}&subject=${encodeURIComponent(button.dataset.subject)}`; renderPage('evaluation'); }));
   document.getElementById('logout').addEventListener('click', logout);
   document.getElementById('menu-toggle').addEventListener('click', function () {
@@ -191,6 +207,7 @@ function renderPage(page) {
   });
   if (page === 'questions') bindQuestionActions();
   if (page === 'faculty') bindFacultyActions();
+  if (page === 'students') bindStudentActions();
   document.getElementById('evaluation-form')?.addEventListener('submit', submitEvaluation);
   document.getElementById('evaluation-subject')?.addEventListener('change', event => { location.hash = `faculty=${encodeURIComponent(evaluationTarget?.facultyId || '')}&subject=${encodeURIComponent(event.target.value)}`; renderPage('evaluation'); });
   document.querySelector('h1')?.focus({ preventScroll: true });
@@ -237,7 +254,9 @@ function calculateOverallAverage(responses = getResponses()) {
 function formatRating(rating) { return rating === null ? '—' : rating.toFixed(2); }
 
 function resultStats() {
-  const responses = currentUser?.role === 'faculty' ? getResponses().filter(response => response.facultyId === currentUser.facultyId) : getResponses();
+  let responses = getResponses();
+  if (currentUser?.role === 'faculty') responses = responses.filter(response => response.facultyId === currentUser.facultyId);
+  if (currentUser?.role === 'admin' && adminResultFacultyId) responses = responses.filter(response => response.facultyId === adminResultFacultyId);
   return `<div class="stats">${stat('Overall Rating', `${formatRating(calculateOverallAverage(responses))} <small>/ 5.00</small>`, 'Average of all submitted ratings')}${stat('Responses', responses.length, 'Total student responses')}${stat('Evaluation Status', 'Active', currentUser?.role === 'faculty' ? currentUser.department : 'All departments')}</div>`;
 }
 
@@ -251,12 +270,15 @@ function renderFacultyDashboard() {
 
 function renderResults() {
   if (!['admin', 'faculty'].includes(currentUser.role)) return '';
-  const responses = currentUser.role === 'faculty' ? getResponses().filter(response => response.facultyId === currentUser.facultyId) : getResponses();
-  const title = currentUser.role === 'faculty' ? `${currentUser.name} - ${currentUser.department} - ${currentUser.facultyId}` : 'Results across all faculty';
-  return `${pageHeading(currentUser.role === 'faculty' ? 'Your teaching, reflected.' : 'Faculty results.', title, 'Evaluation results')}${resultStats()}
+  let responses = currentUser.role === 'faculty' ? getResponses().filter(response => response.facultyId === currentUser.facultyId) : getResponses();
+  const selectedFaculty = currentUser.role === 'admin' ? getFaculty().find(member => member.facultyId === adminResultFacultyId) : null;
+  if (selectedFaculty) responses = responses.filter(response => response.facultyId === selectedFaculty.facultyId);
+  const title = currentUser.role === 'faculty' ? `${currentUser.name} - ${currentUser.department} - ${currentUser.facultyId}` : selectedFaculty ? `${selectedFaculty.name} - ${selectedFaculty.department}` : 'Select a faculty member to view their results';
+  const facultyPicker = currentUser.role === 'admin' ? `<section class="section"><div class="field"><label class="field-label" for="results-faculty">Faculty member</label><select id="results-faculty"><option value="">All faculty</option>${getFaculty().map(member => `<option value="${escapeHtml(member.facultyId)}" ${adminResultFacultyId === member.facultyId ? 'selected' : ''}>${escapeHtml(member.name)} · ${escapeHtml(member.facultyId)}</option>`).join('')}</select></div></section>` : '';
+  return `${pageHeading(currentUser.role === 'faculty' ? 'Your teaching, reflected.' : 'Faculty results.', title, 'Evaluation results')}${facultyPicker}${resultStats()}
     <div class="section-heading"><h2>Category averages</h2><span>Scale of 1-5</span></div>
     ${responses.length ? `<div class="panel">${categories.map(category => { const average = calculateCategoryAverage(category, responses); return `<div class="result-category"><div class="result-category-label"><span>${category}</span><strong>${formatRating(average)} <small>/ 5.00</small></strong></div><div class="result-bar" aria-hidden="true"><div class="result-bar-fill" style="width:${average === null ? 0 : average / 5 * 100}%"></div></div></div>`; }).join('')}</div>` : emptyState(currentUser.role === 'faculty' ? 'No evaluations have been submitted yet.' : 'No evaluation data available.', 'Submitted feedback will appear here automatically.')}
-    ${responses.some(response => response.suggestions?.trim()) ? `<section class="section"><div class="section-heading"><h2>Constructive suggestions</h2></div><div class="question-list">${responses.filter(response => response.suggestions?.trim()).map(response => `<article class="question-row"><div class="question-copy"><p>${escapeHtml(response.suggestions)}</p><p class="question-category">${escapeHtml(response.facultyName || 'Faculty member')} / ${escapeHtml(response.subject || 'Subject not specified')}</p></div></article>`).join('')}</div></section>` : ''}
+    ${responses.some(response => response.suggestions?.trim()) ? `<section class="section"><div class="section-heading"><h2>Constructive suggestions</h2></div><div class="question-list suggestions-list">${responses.filter(response => response.suggestions?.trim()).map(response => `<article class="question-row suggestion-row"><div class="question-copy"><p>${escapeHtml(response.suggestions)}</p><p class="question-category">${escapeHtml(response.facultyName || 'Faculty member')} / ${escapeHtml(response.subject || 'Subject not specified')}</p></div></article>`).join('')}</div></section>` : ''}
     <div class="note section"><h3>About these results</h3><p>Category scores average all ratings in that category. Student names are never displayed.</p></div>`;
 }
 
@@ -272,7 +294,8 @@ function renderFaculty() {
 function bindFacultyActions() {
   if (currentUser?.role !== 'admin') return;
   document.getElementById('add-faculty')?.addEventListener('click', () => {
-    document.getElementById('faculty-editor').innerHTML = `<form class="panel question-editor" id="faculty-form"><h2>Add faculty member</h2><div class="field"><label class="field-label" for="faculty-name">Full name</label><input id="faculty-name" required></div><div class="field"><label class="field-label" for="faculty-username">Username</label><input id="faculty-username" required autocomplete="off"></div><div class="field"><label class="field-label" for="faculty-password">Initial password</label><input id="faculty-password" type="password" required></div><div class="field"><label class="field-label" for="faculty-department">Department</label><input id="faculty-department" required></div><div class="field"><label class="field-label" for="faculty-subjects">Subjects taught</label><input id="faculty-subjects" placeholder="Mathematics, Algebra, Statistics" required><small>Enter multiple subjects separated by commas.</small></div><p class="error" id="faculty-error" role="alert"></p><div class="actions"><button class="button" type="submit">Save faculty</button><button class="button secondary" type="button" id="cancel-faculty">Cancel</button></div></form>`;
+    const subjectOptions = [...new Set(['Data Structure and Algorithm', 'Discrete Structure 2', 'Object Oriented Programming', ...getFaculty().flatMap(member => member.subjects)])].filter(subject => subject !== 'Computer Studies').sort((a, b) => a.localeCompare(b));
+    document.getElementById('faculty-editor').innerHTML = `<form class="panel question-editor" id="faculty-form"><h2>Add faculty member</h2><div class="field"><label class="field-label" for="faculty-name">Full name</label><input id="faculty-name" required></div><div class="field"><label class="field-label" for="faculty-username">Username</label><input id="faculty-username" required autocomplete="off"></div><div class="field"><label class="field-label" for="faculty-password">Initial password</label><input id="faculty-password" type="password" required></div><div class="field"><label class="field-label" for="faculty-department">Department</label><select id="faculty-department" required><option value="">Select department</option><option>Computing Studies</option></select></div><div class="field"><span class="field-label">Subjects taught</span><div class="subject-checkboxes">${subjectOptions.map((subject, index) => `<label class="subject-checkbox"><input type="checkbox" name="faculty-subject" value="${escapeHtml(subject)}" id="faculty-subject-${index}"><span>${escapeHtml(subject)}</span></label>`).join('')}</div><small>Select all that apply. Add new subject names below, separated by commas.</small><input id="faculty-new-subjects" placeholder="Add new subjects (optional)"></div><p class="error" id="faculty-error" role="alert"></p><div class="actions"><button class="button" type="submit">Save faculty</button><button class="button secondary" type="button" id="cancel-faculty">Cancel</button></div></form>`;
     document.getElementById('cancel-faculty').addEventListener('click', () => renderPage('faculty'));
     document.getElementById('faculty-form').addEventListener('submit', async event => {
       event.preventDefault(); if (currentUser?.role !== 'admin') return;
@@ -280,7 +303,7 @@ function bindFacultyActions() {
       const username = document.getElementById('faculty-username').value.trim().toLowerCase();
       const password = document.getElementById('faculty-password').value;
       const department = document.getElementById('faculty-department').value.trim();
-      const subjects = [...new Set(document.getElementById('faculty-subjects').value.split(',').map(value => value.trim()).filter(Boolean))];
+      const subjects = [...new Set([...document.querySelectorAll('input[name="faculty-subject"]:checked')].map(input => input.value).concat(document.getElementById('faculty-new-subjects').value.split(',')).map(value => value.trim()).filter(Boolean))];
       if (!name || !/^[a-z0-9._-]+$/.test(username) || password.length < 6 || !department || !subjects.length) {
         document.getElementById('faculty-error').textContent = 'Enter all fields and choose a password of at least 6 characters.'; return;
       }
@@ -291,6 +314,23 @@ function bindFacultyActions() {
       } catch (error) { document.getElementById('faculty-error').textContent = error.message; }
     });
     document.getElementById('faculty-name').focus();
+  });
+}
+
+function renderStudents() {
+  const students = databaseState.students;
+  const form = studentFormOpen ? `<form class="panel question-editor" id="student-form"><h2>Create student account</h2><div class="field"><label class="field-label" for="student-name">Full name</label><input id="student-name" required></div><div class="field"><label class="field-label" for="student-username">Username</label><input id="student-username" required autocomplete="off"></div><div class="field"><label class="field-label" for="student-program">Program</label><select id="student-program" required><option value="">Select program</option><option value="Computing Studies (BSCS)">Computing Studies (BSCS)</option></select></div><div class="field"><label class="field-label" for="student-year">Year</label><select id="student-year" required><option value="">Select year</option>${['1st Year','2nd Year','3rd Year','4th Year'].map(year => `<option>${year}</option>`).join('')}</select></div><div class="field"><label class="field-label" for="student-password">Initial password</label><input id="student-password" type="password" required minlength="6"></div><p class="error" id="student-error" role="alert"></p><div class="actions"><button class="button" type="submit">Create account</button><button class="button secondary" type="button" id="cancel-student">Cancel</button></div></form>` : '';
+  return `${pageHeading('Students.', 'View student accounts and evaluation completion status.', 'Guidance Office / Students')}<div class="section-heading"><div class="section-title-group"><h2>All students</h2><span>${students.length} students</span></div><button class="button" id="create-student">+ Create Student Account</button></div>${form}<div class="table-wrap"><table><caption class="eyebrow">Student accounts</caption><thead><tr><th>Name</th><th>Year</th><th>Course / Program</th><th>Evaluation Status</th></tr></thead><tbody>${students.map(student => `<tr><td><strong>${escapeHtml(student.name)}</strong></td><td>${escapeHtml(student.year || '—')}</td><td>${escapeHtml(student.program || '—')}</td><td><span class="badge ${student.status === 'Completed' ? 'complete' : ''}">${escapeHtml(student.status)}</span></td></tr>`).join('')}</tbody></table></div>`;
+}
+
+function bindStudentActions() {
+  document.getElementById('create-student').addEventListener('click', () => { studentFormOpen = true; renderPage('students'); });
+  document.getElementById('cancel-student')?.addEventListener('click', () => { studentFormOpen = false; renderPage('students'); });
+  document.getElementById('student-form')?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const payload = { name: document.getElementById('student-name').value.trim(), username: document.getElementById('student-username').value.trim(), program: document.getElementById('student-program').value.trim(), year: document.getElementById('student-year').value, password: document.getElementById('student-password').value };
+    try { await apiRequest('/api/students', { method: 'POST', body: payload }); studentFormOpen = false; await refreshDatabaseState(); renderPage('students'); }
+    catch (error) { document.getElementById('student-error').textContent = error.message; }
   });
 }
 
