@@ -1,24 +1,4 @@
-// School prototype only: never use hardcoded passwords in production.
-// Real applications require server-side authentication and authorization.
-const baseAccounts = [
-  { name: 'Juan Dela Cruz', username: 'student', password: 'student123', role: 'student' },
-  { name: 'Guidance Administrator', username: 'admin', password: 'admin123', role: 'admin' }
-];
-const defaultFaculty = [{ name: 'Ruby Cruz', username: 'rubycruz', password: 'ruby123', role: 'faculty', facultyId: 'FAC-001', department: 'Computer Studies', subjects: ['Computer Studies'] }];
 const categories = ['Teaching Effectiveness', 'Communication', 'Classroom Management', 'Professionalism'];
-const defaultQuestions = [
-  { id: 1, category: categories[0], text: 'The instructor explains lessons clearly.' },
-  { id: 2, category: categories[0], text: 'The instructor demonstrates good knowledge of the subject.' },
-  { id: 3, category: categories[0], text: 'The instructor uses effective teaching methods.' },
-  { id: 4, category: categories[1], text: 'The instructor communicates instructions clearly.' },
-  { id: 5, category: categories[1], text: 'The instructor responds appropriately to student questions.' },
-  { id: 6, category: categories[2], text: 'The instructor manages class time effectively.' },
-  { id: 7, category: categories[2], text: 'The instructor maintains an organized learning environment.' },
-  { id: 8, category: categories[3], text: 'The instructor treats students respectfully.' },
-  { id: 9, category: categories[3], text: 'The instructor comes prepared for class.' },
-  { id: 10, category: categories[3], text: 'The instructor demonstrates professional behavior.' }
-];
-const storageKeys = { questions: 'facultyEvaluationQuestions', responses: 'facultyEvaluationResponses', faculty: 'facultyEvaluationFaculty' };
 const roleNames = { student: 'Student', admin: 'Guidance Office', faculty: 'Faculty Member' };
 const navigation = {
   student: [['dashboard', 'Dashboard'], ['evaluation', 'Evaluations']],
@@ -30,41 +10,37 @@ let currentUser = null;
 let currentPage = 'dashboard';
 let evaluationQuestions = [];
 let evaluationTarget = null;
+let databaseState = { faculty: [], questions: [], responses: [], submittedTargets: [] };
 
-function loadFromLocalStorage(key, fallback) {
-  try {
-    const saved = localStorage.getItem(key);
-    return saved === null ? fallback : JSON.parse(saved);
-  } catch (error) {
-    return fallback;
-  }
+async function apiRequest(path, options = {}) {
+  const response = await fetch(path, {
+    method: options.method || 'GET',
+    credentials: 'same-origin',
+    headers: options.body ? { 'Content-Type': 'application/json' } : undefined,
+    body: options.body ? JSON.stringify(options.body) : undefined
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'The local server could not complete that request.');
+  return data;
 }
 
-function saveToLocalStorage(key, value) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-    return true;
-  } catch (error) {
-    alert('Your browser could not save this change. Enable local storage or free up browser storage, then try again.');
-    return false;
-  }
+function applyDatabaseState(data) {
+  currentUser = data.user;
+  databaseState = {
+    faculty: data.faculty || [],
+    questions: data.questions || [],
+    responses: data.responses || [],
+    submittedTargets: data.submittedTargets || []
+  };
 }
 
-function getQuestions() {
-  return loadFromLocalStorage(storageKeys.questions, defaultQuestions);
-}
-
-function getFaculty() { return loadFromLocalStorage(storageKeys.faculty, defaultFaculty); }
-function getAccounts() { return [...baseAccounts, ...getFaculty()]; }
-
-function getResponses() { return loadFromLocalStorage(storageKeys.responses, []); }
+async function refreshDatabaseState() { applyDatabaseState(await apiRequest('/api/bootstrap')); }
+function getQuestions() { return databaseState.questions; }
+function getFaculty() { return databaseState.faculty; }
+function getResponses() { return databaseState.responses; }
 
 function hasSubmitted(target = evaluationTarget) {
-  return target ? getResponses().some(response => response.studentUsername === currentUser?.username && response.facultyId === target.facultyId && response.subject === target.subject) : getUserResponses().length > 0;
-}
-function getUserResponses() {
-  const facultyId = currentUser?.role === 'faculty' ? currentUser.facultyId : null;
-  return getResponses().filter(response => (!facultyId || response.facultyId === facultyId) && (currentUser?.role !== 'student' || response.studentUsername === currentUser.username));
+  return target ? databaseState.submittedTargets.some(item => item.facultyId === target.facultyId && item.subject === target.subject) : databaseState.submittedTargets.length > 0;
 }
 
 function escapeHtml(value) {
@@ -134,40 +110,26 @@ function renderLogin() {
   });
 }
 
-function login(event) {
+async function login(event) {
   event.preventDefault();
   const entered = document.getElementById('username').value.trim();
   const username = entered.includes('@') ? entered.split('@')[0] : entered;
   const password = document.getElementById('password').value;
-  const aliases = { faculty: 'rubycruz', administrator: 'admin' };
-  const account = getAccounts().find(user => user.username === (aliases[username.toLowerCase()] || username) && (user.password === password || (user.username === 'student' && password === 'student')));
-  if (!account) {
-    document.getElementById('login-error').textContent = 'Invalid username or password.';
-    return;
-  }
   try {
-    const serialized = JSON.stringify({ username: account.username });
-    if (document.getElementById('keep-signed-in').checked) {
-      localStorage.setItem('currentUser', serialized);
-      sessionStorage.removeItem('currentUser');
-    } else {
-      sessionStorage.setItem('currentUser', serialized);
-      localStorage.removeItem('currentUser');
-    }
+    await apiRequest('/api/login', { method: 'POST', body: { username, password, remember: document.getElementById('keep-signed-in').checked } });
+    await refreshDatabaseState();
+    renderPage('dashboard');
   } catch (error) {
-    document.getElementById('login-error').textContent = 'Enable browser session storage to log in.';
-    return;
+    document.getElementById('login-error').textContent = error.message;
   }
-  currentUser = account;
-  renderPage('dashboard');
 }
 
-function logout() {
-  sessionStorage.removeItem('currentUser');
-  localStorage.removeItem('currentUser');
+async function logout() {
+  try { await apiRequest('/api/logout', { method: 'POST', body: {} }); } catch (error) { /* Clear the local view even if the server has stopped. */ }
   currentUser = null;
   evaluationQuestions = [];
   evaluationTarget = null;
+  databaseState = { faculty: [], questions: [], responses: [], submittedTargets: [] };
   renderLogin();
   document.getElementById('username').focus();
 }
@@ -206,9 +168,21 @@ function renderPage(page) {
       <div class="user-panel"><div class="user-info"><div class="avatar" aria-hidden="true">${initials}</div><div><div class="user-name">${currentUser.name}</div><div class="user-role">${roleNames[currentUser.role]}</div></div></div><button class="button secondary full-width logout" id="logout">↗ &nbsp; Log out</button></div>
     </aside>
     <div class="workspace-main"><div class="topbar"><span>${roleNames[currentUser.role]} <span aria-hidden="true"> / </span> <strong>${pageLabel}</strong></span><span class="small-status">Evaluation period active</span></div>
-      <main class="page" id="main-content">${content}<footer class="page-footer"><span>Faculty Evaluation System</span><span>School prototype · Stored in this browser</span></footer></main>
+      <main class="page" id="main-content">${content}<footer class="page-footer"><span>Faculty Evaluation System</span><span>School prototype · Saved in the local SQLite database</span></footer></main>
     </div></div>`;
-  document.querySelectorAll('[data-page]').forEach(button => button.addEventListener('click', () => renderPage(button.dataset.page)));
+  document.querySelectorAll('[data-page]').forEach(button => button.addEventListener('click', async () => {
+    if (button.dataset.page === 'evaluation' && currentUser?.role === 'student') {
+      try {
+        await refreshDatabaseState();
+      } catch (error) {
+        renderPage('evaluation');
+        const message = document.getElementById('evaluation-error');
+        if (message) message.textContent = error.message;
+        return;
+      }
+    }
+    renderPage(button.dataset.page);
+  }));
   document.querySelectorAll('[data-start-evaluation]').forEach(button => button.addEventListener('click', () => { location.hash = `faculty=${encodeURIComponent(button.dataset.startEvaluation)}&subject=${encodeURIComponent(button.dataset.subject)}`; renderPage('evaluation'); }));
   document.getElementById('logout').addEventListener('click', logout);
   document.getElementById('menu-toggle').addEventListener('click', function () {
@@ -282,7 +256,7 @@ function renderResults() {
   return `${pageHeading(currentUser.role === 'faculty' ? 'Your teaching, reflected.' : 'Faculty results.', title, 'Evaluation results')}${resultStats()}
     <div class="section-heading"><h2>Category averages</h2><span>Scale of 1-5</span></div>
     ${responses.length ? `<div class="panel">${categories.map(category => { const average = calculateCategoryAverage(category, responses); return `<div class="result-category"><div class="result-category-label"><span>${category}</span><strong>${formatRating(average)} <small>/ 5.00</small></strong></div><div class="result-bar" aria-hidden="true"><div class="result-bar-fill" style="width:${average === null ? 0 : average / 5 * 100}%"></div></div></div>`; }).join('')}</div>` : emptyState(currentUser.role === 'faculty' ? 'No evaluations have been submitted yet.' : 'No evaluation data available.', 'Submitted feedback will appear here automatically.')}
-    ${responses.some(response => response.suggestions?.trim()) ? `<section class="section"><div class="section-heading"><h2>Constructive suggestions</h2></div><div class="question-list">${responses.filter(response => response.suggestions?.trim()).map(response => `<article class="question-row"><div class="question-copy"><p>${escapeHtml(response.suggestions)}</p><p class="question-category">${escapeHtml(response.subject || 'Subject not specified')}</p></div></article>`).join('')}</div></section>` : ''}
+    ${responses.some(response => response.suggestions?.trim()) ? `<section class="section"><div class="section-heading"><h2>Constructive suggestions</h2></div><div class="question-list">${responses.filter(response => response.suggestions?.trim()).map(response => `<article class="question-row"><div class="question-copy"><p>${escapeHtml(response.suggestions)}</p><p class="question-category">${escapeHtml(response.facultyName || 'Faculty member')} / ${escapeHtml(response.subject || 'Subject not specified')}</p></div></article>`).join('')}</div></section>` : ''}
     <div class="note section"><h3>About these results</h3><p>Category scores average all ratings in that category. Student names are never displayed.</p></div>`;
 }
 
@@ -300,19 +274,21 @@ function bindFacultyActions() {
   document.getElementById('add-faculty')?.addEventListener('click', () => {
     document.getElementById('faculty-editor').innerHTML = `<form class="panel question-editor" id="faculty-form"><h2>Add faculty member</h2><div class="field"><label class="field-label" for="faculty-name">Full name</label><input id="faculty-name" required></div><div class="field"><label class="field-label" for="faculty-username">Username</label><input id="faculty-username" required autocomplete="off"></div><div class="field"><label class="field-label" for="faculty-password">Initial password</label><input id="faculty-password" type="password" required></div><div class="field"><label class="field-label" for="faculty-department">Department</label><input id="faculty-department" required></div><div class="field"><label class="field-label" for="faculty-subjects">Subjects taught</label><input id="faculty-subjects" placeholder="Mathematics, Algebra, Statistics" required><small>Enter multiple subjects separated by commas.</small></div><p class="error" id="faculty-error" role="alert"></p><div class="actions"><button class="button" type="submit">Save faculty</button><button class="button secondary" type="button" id="cancel-faculty">Cancel</button></div></form>`;
     document.getElementById('cancel-faculty').addEventListener('click', () => renderPage('faculty'));
-    document.getElementById('faculty-form').addEventListener('submit', event => {
+    document.getElementById('faculty-form').addEventListener('submit', async event => {
       event.preventDefault(); if (currentUser?.role !== 'admin') return;
       const name = document.getElementById('faculty-name').value.trim();
       const username = document.getElementById('faculty-username').value.trim().toLowerCase();
       const password = document.getElementById('faculty-password').value;
       const department = document.getElementById('faculty-department').value.trim();
       const subjects = [...new Set(document.getElementById('faculty-subjects').value.split(',').map(value => value.trim()).filter(Boolean))];
-      if (!name || !/^[a-z0-9._-]+$/.test(username) || password.length < 6 || !department || !subjects.length || getAccounts().some(user => user.username === username)) {
-        document.getElementById('faculty-error').textContent = 'Enter all fields, use a unique username, and choose a password of at least 6 characters.'; return;
+      if (!name || !/^[a-z0-9._-]+$/.test(username) || password.length < 6 || !department || !subjects.length) {
+        document.getElementById('faculty-error').textContent = 'Enter all fields and choose a password of at least 6 characters.'; return;
       }
-      const faculty = getFaculty();
-      faculty.push({ name, username, password, department, subjects, role: 'faculty', facultyId: `FAC-${String(faculty.length + 1).padStart(3, '0')}` });
-      if (saveToLocalStorage(storageKeys.faculty, faculty)) renderPage('faculty');
+      try {
+        await apiRequest('/api/faculty', { method: 'POST', body: { name, username, password, department, subjects } });
+        await refreshDatabaseState();
+        renderPage('faculty');
+      } catch (error) { document.getElementById('faculty-error').textContent = error.message; }
     });
     document.getElementById('faculty-name').focus();
   });
@@ -346,7 +322,7 @@ function showQuestionEditor(question = null) {
     <p class="error" id="question-error" role="alert"></p><div class="actions"><button class="button" type="submit">Save</button><button class="button secondary" type="button" id="cancel-question">Cancel</button></div></form>`;
   document.getElementById('question-text').focus();
   document.getElementById('cancel-question').addEventListener('click', () => renderPage('questions'));
-  document.getElementById('question-form').addEventListener('submit', event => {
+  document.getElementById('question-form').addEventListener('submit', async event => {
     event.preventDefault();
     if (currentUser?.role !== 'admin') return;
     const text = document.getElementById('question-text').value.trim();
@@ -364,14 +340,23 @@ function showQuestionEditor(question = null) {
       const id = Math.max(0, ...questions.map(item => item.id)) + 1;
       questions.push({ id, text, category });
     }
-    if (saveToLocalStorage(storageKeys.questions, questions)) renderPage('questions');
+    try {
+      await apiRequest('/api/questions', { method: 'PUT', body: { questions } });
+      await refreshDatabaseState();
+      renderPage('questions');
+    } catch (error) { document.getElementById('question-error').textContent = error.message; }
   });
 }
 
-function deleteQuestion(id) {
+async function deleteQuestion(id) {
   if (currentUser?.role !== 'admin') return;
   if (!confirm('Delete this question? Existing submitted results will be preserved.')) return;
-  if (saveToLocalStorage(storageKeys.questions, getQuestions().filter(question => question.id !== id))) renderPage('questions');
+  try {
+    const questions = getQuestions().filter(question => question.id !== id);
+    await apiRequest('/api/questions', { method: 'PUT', body: { questions } });
+    await refreshDatabaseState();
+    renderPage('questions');
+  } catch (error) { alert(error.message); }
 }
 
 function renderEvaluation() {
@@ -391,9 +376,11 @@ function renderEvaluation() {
     <form id="evaluation-form" novalidate>${categories.map(category => { const questions = evaluationQuestions.filter(question => question.category === category); if (!questions.length) return ''; return `<section class="evaluation-category"><h2>${category}</h2>${questions.map(question => { number++; return `<fieldset class="rating-question" id="rating-question-${question.id}"><legend>${number}. ${escapeHtml(question.text)}</legend><div class="rating-options">${ratingNames.map((name, index) => `<label class="rating-option"><input type="radio" name="question-${question.id}" value="${index + 1}" required aria-label="${index + 1} - ${name}"><span>${index + 1}<small>${name}</small></span></label>`).join('')}</div></fieldset>`; }).join('')}</section>`; }).join('')}<section class="evaluation-category"><h2>Additional feedback</h2><div class="field"><label class="field-label" for="constructive-suggestions">Provide constructive suggestions</label><p class="question-category">Examples: pacing of lectures, clarity of assignments, availability for help, or use of class time.</p><textarea id="constructive-suggestions" name="suggestions" maxlength="1500" rows="5" placeholder="Share your suggestions for this faculty member and subject (optional)."></textarea></div></section><p class="error" id="evaluation-error" role="alert"></p><div class="submit-row"><p>Answer all ${evaluationQuestions.length} questions.<br>Your evaluation can only be submitted once for this subject.</p><div class="actions"><button class="button secondary" type="button" data-page="dashboard">Back</button><button class="button" type="submit">Submit Evaluation</button></div></div></form>`;
 }
 
-function submitEvaluation(event) {
+async function submitEvaluation(event) {
   event.preventDefault();
   if (currentUser?.role !== 'student') return;
+  try { await refreshDatabaseState(); }
+  catch (error) { document.getElementById('evaluation-error').textContent = error.message; return; }
   if (hasSubmitted()) return renderPage('confirmation');
   // If the admin changed questions in another tab, refresh the form before saving.
   if (JSON.stringify(evaluationQuestions) !== JSON.stringify(getQuestions())) {
@@ -423,9 +410,15 @@ function submitEvaluation(event) {
     return;
   }
   const suggestions = document.getElementById('constructive-suggestions').value.trim();
-  const response = { facultyId: evaluationTarget.facultyId, facultyName: evaluationTarget.name, subject: evaluationTarget.subject, studentUsername: currentUser.username, submittedAt: new Date().toISOString(), answers, suggestions };
-  response.overallAverage = calculateOverallAverage([response]);
-  if (saveToLocalStorage(storageKeys.responses, [...getResponses(), response])) renderPage('confirmation');
+  try {
+    await apiRequest('/api/evaluations', { method: 'POST', body: { facultyId: evaluationTarget.facultyId, subject: evaluationTarget.subject, answers, suggestions } });
+    await refreshDatabaseState();
+    renderPage('confirmation');
+  } catch (error) {
+    const message = document.getElementById('evaluation-error');
+    message.textContent = error.message;
+    document.querySelector('.evaluation-category')?.prepend(message);
+  }
 }
 
 function renderConfirmation() {
@@ -433,23 +426,14 @@ function renderConfirmation() {
     <div class="panel confirmation"><div class="confirmation-symbol" aria-hidden="true">✓</div><span class="eyebrow">${escapeHtml(evaluationTarget?.name || "")} / ${escapeHtml(evaluationTarget?.subject || "")}</span><h2>Evaluation Submitted</h2><p>Thank you for providing your feedback.</p><p class="muted">Your evaluation has been saved. No further action is needed.</p><button class="button" data-page="dashboard">Back to Dashboard ↗</button></div>`;
 }
 
-function initialize() {
-  if (loadFromLocalStorage(storageKeys.questions, null) === null) saveToLocalStorage(storageKeys.questions, defaultQuestions);
+async function initialize() {
   try {
-    const session = JSON.parse(sessionStorage.getItem('currentUser') || localStorage.getItem('currentUser'));
-    currentUser = getAccounts().find(account => account.username === session?.username) || null;
+    await refreshDatabaseState();
+    if (currentUser) renderPage('dashboard');
+    else renderLogin();
   } catch (error) {
-    currentUser = null;
+    app.innerHTML = `<main class="login-shell"><section class="login-form-area"><div class="login-card"><span class="eyebrow">Faculty Evaluation System</span><h1>Start the local database server</h1><p class="subtitle">From the project folder, run <code>python server.py</code>, then open <code>http://127.0.0.1:8000</code>.</p></div></section></main>`;
   }
-  if (currentUser) renderPage('dashboard');
-  else renderLogin();
 }
-
-// Keep results fresh if another tab submits feedback. Preserve forms being edited.
-window.addEventListener('storage', event => {
-  if (!currentUser || !Object.values(storageKeys).includes(event.key)) return;
-  if (currentPage === 'evaluation' || currentPage === 'questions' || currentPage === 'faculty') return;
-  renderPage(currentPage);
-});
 
 initialize();
