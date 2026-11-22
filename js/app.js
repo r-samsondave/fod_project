@@ -222,9 +222,10 @@ function renderDashboard() {
 
 function renderStudentDashboard() {
   const faculty = getFaculty();
+  const firstName = currentUser.name.trim().split(/\s+/)[0] || 'Student';
   const targets = faculty.flatMap(member => (member.subjects || []).map(subject => ({ ...member, subject })));
   const completed = targets.filter(target => hasSubmitted(target)).length;
-  return `${pageHeading('Welcome, Juan.', 'Choose a faculty member and the subject you are taking with them.', 'Student dashboard')}
+  return `${pageHeading(`Welcome, ${escapeHtml(firstName)}.`, 'Choose a faculty member and the subject you are taking with them.', 'Student dashboard')}
     <div class="stats">${stat('Available evaluations', String(targets.length), 'Faculty and subject combinations')}${stat('Evaluations completed', String(completed), `Of ${targets.length} available`)}${stat('Evaluation period', 'Active', 'Your feedback is welcome')}</div>
     <div class="section-heading"><h2>Available Evaluations</h2><span>${targets.length} subjects</span></div>
     ${targets.length ? targets.map(target => { const done = hasSubmitted(target); return `<div class="panel faculty-card section"><div class="faculty-avatar" aria-hidden="true">${escapeHtml(target.name.split(' ').map(part => part[0]).slice(0,2).join(''))}</div><div class="faculty-details"><span class="eyebrow">${escapeHtml(target.facultyId)} / ${escapeHtml(target.department)}</span><h3>${escapeHtml(target.name)}</h3><p>${escapeHtml(target.subject)}</p></div><div class="card-action"><span class="badge ${done ? 'complete' : ''}">${done ? 'Completed' : 'Not Completed'}</span><button class="button" data-start-evaluation="${escapeHtml(target.facultyId)}" data-subject="${escapeHtml(target.subject)}" ${done || !getQuestions().length ? 'disabled' : ''}>${done ? 'Submitted' : 'Start Evaluation'}</button></div></div>`; }).join('') : emptyState('No faculty are available yet.', 'Please check back after the administrator adds faculty and subjects.')}
